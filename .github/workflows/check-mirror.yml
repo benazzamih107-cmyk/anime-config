@@ -34,6 +34,16 @@ jobs:
           git config user.name "mirror-check-bot"
           git config user.email "noreply@anthropic.com"
 
+          # probe URL MARKER FILE  → يطبع origin النهائي إن كانت الاستجابة 2xx وفيها علامة الموقع، وإلا لا يطبع شيئًا
+          probe() {
+            local url="$1" marker="$2" out="$3" res code eff
+            res=$(curl -sL -A "$UA" -o "$out" --max-time 30 -w '%{http_code} %{url_effective}' "$url" || true)
+            code="${res%% *}"; eff="${res#* }"
+            case "$code" in 2*) ;; *) return 0;; esac
+            grep -qiP "$marker" "$out" || return 0
+            echo "$eff" | grep -oP '^https?://[^/]+' || true
+          }
+
           for NAME in "${!SITES[@]}"; do
             MARKER="${SITES[$NAME]}"
             OLD=$(jq -r --arg k "$NAME" '.[$k] // empty' "$FILE" || true)
@@ -44,26 +54,33 @@ jobs:
             OLD_BASE="${OLD%/}"
             echo "[$NAME] الحالي: $OLD"
 
-            NEW=$(curl -sL -A "$UA" -o "/tmp/page_$NAME.html" --max-time 30 -w '%{url_effective}' "$OLD_BASE/" || true)
-            NEW_ORIGIN=$(echo "$NEW" | grep -oP '^https?://[^/]+' || true)
+            # 1) النطاق الحالي (مع اتباع التحويل)  2) المرايا الاحتياطية بالترتيب
+            NEW_ORIGIN=$(probe "$OLD_BASE/" "$MARKER" "/tmp/page_$NAME.html")
+            if [ -z "$NEW_ORIGIN" ]; then
+              echo "[$NAME] النطاق الحالي لا يعمل — أجرّب المرايا."
+              while read -r MIRROR; do
+                [ -z "$MIRROR" ] && continue
+                NEW_ORIGIN=$(probe "${MIRROR%/}/" "$MARKER" "/tmp/mirror_$NAME.html")
+                if [ -n "$NEW_ORIGIN" ]; then echo "[$NAME] مرآة سليمة: $MIRROR -> $NEW_ORIGIN"; break; fi
+              done < <(jq -r --arg k "$NAME" '.MIRRORS[$k][]? // empty' "$FILE")
+            fi
 
             if [ -z "$NEW_ORIGIN" ]; then
-              echo "[$NAME] تعذّر الوصول — يلزم تدخل يدوي، تجاهلته."
+              echo "[$NAME] لا النطاق الحالي ولا المرايا تعمل — يلزم تدخل يدوي."
               continue
             fi
             if [ "$NEW_ORIGIN" = "$OLD_BASE" ]; then
               echo "[$NAME] لم يتغيّر."
               continue
             fi
-            if ! grep -qiP "$MARKER" "/tmp/page_$NAME.html"; then
-              echo "[$NAME] الوجهة الجديدة ($NEW_ORIGIN) لا تحمل علامات الموقع — تجاهلتها تحسبًا لصفحة محجوزة."
-              continue
-            fi
 
             VALUE="$NEW_ORIGIN"
             case "$OLD" in */) VALUE="$NEW_ORIGIN/";; esac
             echo "[$NAME] تغيّر: $OLD -> $VALUE"
-            jq --arg k "$NAME" --arg v "$VALUE" '.[$k]=$v' "$FILE" > /tmp/domains.new && mv /tmp/domains.new "$FILE"
+            # نحافظ على النطاق القديم ضمن المرايا ليُجرَّب لاحقًا إن لزم
+            jq --arg k "$NAME" --arg v "$VALUE" --arg o "$OLD" \
+              '.[$k]=$v | .MIRRORS[$k]=(((.MIRRORS[$k] // []) + [$o]) | map(select(. != $v)) | unique)' \
+              "$FILE" > /tmp/domains.new && mv /tmp/domains.new "$FILE"
             CHANGED=1
           done
 
