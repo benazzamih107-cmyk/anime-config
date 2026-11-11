@@ -1,0 +1,77 @@
+name: Check mirror domains (WitAnime / Anime4up / RistoAnime)
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # كل يوم الساعة 06:00 UTC تقريبًا
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # لإضافة موقع جديد مستقبلًا لهذا الفحص التلقائي: أضف سطرًا هنا بنفس الصيغة
+      #   CONST|علامة-تحقق-نصية-توجد-في-صفحة-الموقع (تكتب بأحرف صغيرة، يمكن | للبدائل)
+      # اسم الثابت (CONST) يجب أن يكون مفتاحًا في domains.json
+      - name: Follow redirects and update any changed mirror domain
+        run: |
+          set -e
+          FILE=domains.json
+          CHANGED=0
+
+          declare -A SITES=(
+            [SITE]="witanime|ويت ?انمي"
+            [SITE2]="anime4up|أنمي ?ويب"
+            [SITE3]="ristoanime|ريستو ?انمي"
+          )
+
+          git config user.name "mirror-check-bot"
+          git config user.email "noreply@anthropic.com"
+
+          for NAME in "${!SITES[@]}"; do
+            MARKER="${SITES[$NAME]}"
+            OLD=$(jq -r --arg k "$NAME" '.[$k] // empty' "$FILE" || true)
+            if [ -z "$OLD" ]; then
+              echo "[$NAME] لم أجد الثابت في الملف — تجاهلته."
+              continue
+            fi
+            echo "[$NAME] الحالي: $OLD"
+
+            NEW=$(curl -sL -o /tmp/page_$NAME.html --max-time 25 -w '%{url_effective}' "$OLD/" || true)
+            NEW_ORIGIN=$(echo "$NEW" | grep -oP '^https?://[^/]+' || true)
+
+            if [ -z "$NEW_ORIGIN" ]; then
+              echo "[$NAME] تعذّر الوصول (لا تحويل ولا استجابة) — يلزم تدخل يدوي، تجاهلته."
+              continue
+            fi
+
+            if [ "$NEW_ORIGIN" = "$OLD" ]; then
+              echo "[$NAME] النطاق لم يتغيّر."
+              continue
+            fi
+
+            if ! grep -qiP "$MARKER" /tmp/page_$NAME.html; then
+              echo "[$NAME] النطاق الجديد ($NEW_ORIGIN) لا يحمل علامات الموقع المتوقعة — تجاهلته تحسبًا لصفحة محجوزة/مختطفة."
+              continue
+            fi
+
+            echo "[$NAME] تغيّر النطاق: $OLD -> $NEW_ORIGIN"
+            jq --arg k "$NAME" --arg v "$NEW_ORIGIN" '.[$k]=$v' "$FILE" > /tmp/domains.new && mv /tmp/domains.new "$FILE"
+            grep -n "\"$NAME\"" "$FILE" || true
+
+            git add "$FILE"
+            git commit -m "Auto-update $NAME mirror domain: $OLD -> $NEW_ORIGIN" \
+              -m "Detected by the daily mirror-check workflow (HTTP redirect from the previous domain) and verified against the expected site markers."
+            CHANGED=1
+          done
+
+          if [ "$CHANGED" = "1" ]; then
+            git push
+          else
+            echo "لا تغييرات اليوم."
+          fi
