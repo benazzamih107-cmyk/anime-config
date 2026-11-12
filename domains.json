@@ -1,7 +1,7 @@
 {
   "SITE": "https://witanime.site",
   "SITE2": "https://w1.anime4up.rest",
-  "SITE3": "https://ristoanime.me",
+  "SITE3": "https://ristoanime.cc",
   "RS_HOME": "https://witaanime.com/",
   "MIRRORS": {
     "SITE": [],
@@ -11,6 +11,7 @@
     ],
     "SITE3": [
       "https://ristoanime.com",
+      "https://ristoanime.me",
       "https://ristoanime.org"
     ],
     "RS_HOME": []
