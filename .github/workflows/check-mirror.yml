@@ -29,6 +29,7 @@ jobs:
             [SITE2]="anime4up|أنمي ?ويب|انمي ?فور ?اب"
             [SITE3]="ristoanime|ريستو ?انمي"
             [RS_HOME]="ristoanime|ريستو ?انمي|witaanime"
+            [SITE4]="anime3rb|انمي ?عرب|أنمي ?عرب"
           )
 
           git config user.name "mirror-check-bot"
@@ -90,4 +91,46 @@ jobs:
             git push
           else
             echo "لا تغييرات."
+          fi
+
+      # تقرير صحة: هل نطاق المشغّل يستجيب، وهل المسارات الأساسية (القوائم) ما زالت موجودة؟
+      # لا يغيّر شيئًا في domains.json؛ يكتب status.json ويرفع تنبيهًا (warning) عند عطل.
+      - name: Health report (player host + base paths)
+        run: |
+          set -u
+          UA='Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Mobile Safari/537.36'
+          FILE=domains.json
+          echo '{}' > /tmp/status.json
+          add() { jq --arg k "$1" --arg v "$2" '.[$k]=$v' /tmp/status.json > /tmp/s2 && mv /tmp/s2 /tmp/status.json; }
+          bad() { echo "::warning::$1"; }
+
+          PH=$(jq -r '.A3_PLAYER // empty' "$FILE")
+          if [ -n "$PH" ]; then
+            code=$(curl -s -o /dev/null -A "$UA" --max-time 20 -w '%{http_code}' "https://$PH/" || true)
+            if [ "$code" = "000" ] || [ -z "$code" ]; then add "A3_PLAYER:$PH" "down"; bad "نطاق مشغّل anime3rb لا يستجيب: $PH"; else add "A3_PLAYER:$PH" "up ($code)"; fi
+          fi
+
+          for SITE in SITE SITE2 SITE3 SITE4; do
+            BASE=$(jq -r --arg k "$SITE" '.[$k] // empty' "$FILE")
+            [ -z "$BASE" ] && continue
+            for KEY in $(jq -r --arg k "$SITE" '(.PATHS[$k] // {}) | keys[]' "$FILE"); do
+              case "$KEY" in search|title|episode) continue;; esac     # تحتاج وسيطًا
+              P=$(jq -r --arg k "$SITE" --arg p "$KEY" '.PATHS[$k][$p]' "$FILE")
+              case "$P" in /*) ;; *) continue;; esac
+              code=$(curl -sL -A "$UA" -o /dev/null --max-time 25 -w '%{http_code}' "${BASE%/}$P" || true)
+              case "$code" in
+                2*|3*) add "$SITE:$KEY" "ok ($code)";;
+                403|429|503) add "$SITE:$KEY" "محجوب ($code)";;   # غالبًا حماية Cloudflare للخادم لا عطل حقيقي
+                *) add "$SITE:$KEY" "عطل ($code)"; bad "$SITE $KEY ($P) رجع $code";;
+              esac
+            done
+          done
+
+          if ! cmp -s /tmp/status.json status.json 2>/dev/null; then
+            cp /tmp/status.json status.json
+            git config user.name "mirror-check-bot"; git config user.email "noreply@anthropic.com"
+            git add status.json
+            git commit -m "Update health status" && git push
+          else
+            echo "الحالة لم تتغير."
           fi
