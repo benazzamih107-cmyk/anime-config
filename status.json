@@ -6,8 +6,8 @@
   "SITE2:anime": "ok (200)",
   "SITE2:latest": "ok (200)",
   "SITE2:movies": "ok (200)",
-  "SITE3:anime": "ok (200)",
-  "SITE3:movies": "ok (200)",
+  "SITE3:anime": "عطل (000)",
+  "SITE3:movies": "عطل (000)",
   "SITE4:anime": "محجوب (403)",
   "SITE4:movies": "محجوب (403)"
 }
