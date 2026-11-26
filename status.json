@@ -1,8 +1,8 @@
 {
   "A3_PLAYER:video.vid3rb.com": "up (302)",
-  "SITE:anime": "محجوب (403)",
-  "SITE:latest": "محجوب (403)",
-  "SITE:movies": "محجوب (403)",
+  "SITE:anime": "ok (200)",
+  "SITE:latest": "عطل (404)",
+  "SITE:movies": "ok (200)",
   "SITE2:anime": "ok (200)",
   "SITE2:latest": "ok (200)",
   "SITE2:movies": "ok (200)",
